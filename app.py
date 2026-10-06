@@ -1,9 +1,7 @@
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-# Simulated database: a plain list of dictionaries.
-# Field names mirror OpenFoodFacts (product_name, brands, ingredients_text).
 inventory = [
     {
         "id": 1,
@@ -34,10 +32,109 @@ inventory = [
     },
 ]
 
+ALLOWED_FIELDS = {"barcode", "product_name", "brands", "ingredients_text", "price", "stock"}
+
+
+def error(message, status):
+    return jsonify({"error": message}), status
+
+
+def find_item(item_id):
+    return next((item for item in inventory if item["id"] == item_id), None)
+
+
+def next_id():
+    return max((item["id"] for item in inventory), default=0) + 1
+
+
+def validate(data, require_name):
+    if not isinstance(data, dict):
+        return "Request body must be a JSON object"
+
+    unknown = set(data) - ALLOWED_FIELDS
+    if unknown:
+        return f"Unknown field(s): {', '.join(sorted(unknown))}"
+
+    if require_name and not str(data.get("product_name", "")).strip():
+        return "product_name is required"
+
+    if "product_name" in data and not str(data["product_name"]).strip():
+        return "product_name cannot be empty"
+
+    if "price" in data:
+        p = data["price"]
+        if isinstance(p, bool) or not isinstance(p, (int, float)) or p < 0:
+            return "price must be a non-negative number"
+
+    if "stock" in data:
+        s = data["stock"]
+        if isinstance(s, bool) or not isinstance(s, int) or s < 0:
+            return "stock must be a non-negative integer"
+
+    return None
+
+
+@app.get("/")
+def home():
+    return jsonify({"message": "Inventory API is running. Try /inventory"}), 200
+
 
 @app.get("/inventory")
 def get_inventory():
     return jsonify(inventory), 200
+
+
+@app.get("/inventory/<int:item_id>")
+def get_item(item_id):
+    item = find_item(item_id)
+    if item is None:
+        return error("Item not found", 404)
+    return jsonify(item), 200
+
+
+@app.post("/inventory")
+def add_item():
+    data = request.get_json(silent=True)
+    problem = validate(data, require_name=True)
+    if problem:
+        return error(problem, 400)
+
+    item = {
+        "id": next_id(),
+        "barcode": data.get("barcode", ""),
+        "product_name": data["product_name"].strip(),
+        "brands": data.get("brands", ""),
+        "ingredients_text": data.get("ingredients_text", ""),
+        "price": data.get("price", 0.0),
+        "stock": data.get("stock", 0),
+    }
+    inventory.append(item)
+    return jsonify(item), 201
+
+
+@app.patch("/inventory/<int:item_id>")
+def update_item(item_id):
+    item = find_item(item_id)
+    if item is None:
+        return error("Item not found", 404)
+
+    data = request.get_json(silent=True)
+    problem = validate(data, require_name=False)
+    if problem:
+        return error(problem, 400)
+
+    item.update(data)
+    return jsonify(item), 200
+
+
+@app.delete("/inventory/<int:item_id>")
+def delete_item(item_id):
+    item = find_item(item_id)
+    if item is None:
+        return error("Item not found", 404)
+    inventory.remove(item)
+    return jsonify({"message": f"Item {item_id} deleted"}), 200
+
 
 if __name__ == "__main__":
     app.run(debug=True, port=5001)
