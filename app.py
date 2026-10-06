@@ -1,5 +1,8 @@
 import copy
+
 from flask import Flask, jsonify, request
+
+import off_client
 
 app = Flask(__name__)
 
@@ -119,8 +122,26 @@ def add_item():
         "price": data.get("price", 0.0),
         "stock": data.get("stock", 0),
     }
+
+    warning = None
+    if item["barcode"]:
+        try:
+            details = off_client.fetch_by_barcode(item["barcode"])
+            if details:
+                if not item["brands"]:
+                    item["brands"] = details["brands"]
+                if not item["ingredients_text"]:
+                    item["ingredients_text"] = details["ingredients_text"]
+            else:
+                warning = "Barcode not found on OpenFoodFacts"
+        except off_client.ExternalAPIError:
+            warning = "OpenFoodFacts unavailable; item saved without extra details"
+
     inventory.append(item)
-    return jsonify(item), 201
+    response_body = dict(item)
+    if warning:
+        response_body["warning"] = warning
+    return jsonify(response_body), 201
 
 
 @app.patch("/inventory/<int:item_id>")
@@ -145,6 +166,25 @@ def delete_item(item_id):
         return error("Item not found", 404)
     inventory.remove(item)
     return jsonify({"message": f"Item {item_id} deleted"}), 200
+
+
+@app.get("/external/search")
+def external_search():
+    barcode = request.args.get("barcode", "").strip()
+    name = request.args.get("name", "").strip()
+    if not barcode and not name:
+        return error("Provide a 'barcode' or 'name' query parameter", 400)
+
+    try:
+        if barcode:
+            product = off_client.fetch_by_barcode(barcode)
+            if product is None:
+                return error("Product not found on OpenFoodFacts", 404)
+            return jsonify({"status": 1, "product": product}), 200
+        products = off_client.search_by_name(name)
+        return jsonify({"count": len(products), "products": products}), 200
+    except off_client.ExternalAPIError as exc:
+        return error(str(exc), 502)
 
 
 if __name__ == "__main__":
