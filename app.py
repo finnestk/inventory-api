@@ -1,8 +1,9 @@
+import copy
 from flask import Flask, jsonify, request
 
 app = Flask(__name__)
 
-inventory = [
+SEED_DATA = [
     {
         "id": 1,
         "barcode": "5449000000996",
@@ -31,6 +32,16 @@ inventory = [
         "stock": 25,
     },
 ]
+
+inventory = []
+
+
+def reset_inventory():
+    inventory.clear()
+    inventory.extend(copy.deepcopy(SEED_DATA))
+
+
+reset_inventory()
 
 ALLOWED_FIELDS = {"barcode", "product_name", "brands", "ingredients_text", "price", "stock"}
 
